@@ -282,8 +282,8 @@ esp_err_t pressure_controller_start_autotune(void)
     s_autotune.active = true;
     s_autotune.start_time_us = esp_timer_get_time();
     s_autotune.relay_state = true;
-    s_autotune.relay_output_high = AUTOTUNE_SETPOINT_PCT + AUTOTUNE_STEP_PERCENT;
-    s_autotune.relay_output_low = AUTOTUNE_SETPOINT_PCT - AUTOTUNE_STEP_PERCENT;
+    s_autotune.relay_output_high = AUTOTUNE_PRESSURE_CENTER + AUTOTUNE_STEP_PERCENT;
+    s_autotune.relay_output_low = AUTOTUNE_PRESSURE_CENTER - AUTOTUNE_STEP_PERCENT;
 
     // Update system state
     g_system_state.autotune_state = AUTOTUNE_INIT;
@@ -449,15 +449,16 @@ esp_err_t pressure_controller_run_autotune(float current_weight)
             // Relay feedback test
             detect_peak(current_weight);
 
-            // Relay logic: switch output based on error
-            float error = AUTOTUNE_SETPOINT_PCT - current_weight;
+            // Relay logic: switch output based on weight error
+            // Oscillate around mid-point of test fill
+            float error = AUTOTUNE_WEIGHT_SETPOINT - current_weight;
 
             if (error > 0 && !s_autotune.relay_state) {
-                // Switch to high
+                // Below setpoint: Switch to high pressure
                 s_autotune.relay_state = true;
                 set_dac_output(s_autotune.relay_output_high);
             } else if (error < 0 && s_autotune.relay_state) {
-                // Switch to low
+                // Above setpoint: Switch to low pressure
                 s_autotune.relay_state = false;
                 set_dac_output(s_autotune.relay_output_low);
             }

@@ -86,6 +86,15 @@
  * FILL CONTROL PARAMETERS
  * ===========================================================================*/
 
+// IMPORTANT: Pressure calibration from real testing
+// ITV2030 control range: 30-65 PSI (30%-65% DAC output)
+//   - Below 30 PSI: Too slow, unreliable flow
+//   - Above 65 PSI: Too fast, difficult to control
+// Flow characteristics:
+//   - 1 pump action = ~0.5 lb of material
+//   - 30 PSI → 2 pumps/sec → 1.0 lb/sec
+//   - 65 PSI → 5-6 pumps/sec → 3.0 lb/sec
+
 // Zone thresholds (percentage of target weight)
 #define ZONE_FAST_END 60.0f        // 0-60% of target
 #define ZONE_MODERATE_END 85.0f    // 60-85% of target
@@ -93,17 +102,19 @@
 #define ZONE_FINE_END 100.0f       // 97.5-100% of target
 
 // Base pressure setpoints for each zone (percentage, 0-100%)
-// These are used as base values for hybrid PID control
-#define PRESSURE_FAST 33.0f        // ~20 PSI equivalent (aggressive)
-#define PRESSURE_MODERATE 66.0f    // ~40 PSI equivalent
-#define PRESSURE_SLOW 100.0f       // ~60 PSI equivalent
-#define PRESSURE_FINE 83.0f        // ~50 PSI equivalent (prevent overshoot)
+// Based on real testing: 30 PSI min (2 pumps/sec) to 65 PSI max (5-6 pumps/sec)
+// Each pump = ~0.5 lb, so flow rates: 1.0-3.0 lb/sec
+#define PRESSURE_FAST 65.0f        // 65 PSI - Fast fill (5-6 pumps/sec, ~3.0 lb/sec)
+#define PRESSURE_MODERATE 55.0f    // 55 PSI - Moderate (4 pumps/sec, ~2.0 lb/sec)
+#define PRESSURE_SLOW 45.0f        // 45 PSI - Slow (3 pumps/sec, ~1.5 lb/sec)
+#define PRESSURE_FINE 30.0f        // 30 PSI - Fine (2 pumps/sec, ~1.0 lb/sec)
 
 // PID adjustment ranges per zone (percentage points, ±)
-#define PID_RANGE_FAST 8.0f        // ±5 PSI equivalent (±8%)
-#define PID_RANGE_MODERATE 16.0f   // ±10 PSI equivalent (±16%)
-#define PID_RANGE_SLOW 13.0f       // ±8 PSI equivalent (±13%)
-#define PID_RANGE_FINE 16.0f       // ±10 PSI equivalent (±16%)
+// Tighter ranges since we're working in 30-65 PSI window (35% span)
+#define PID_RANGE_FAST 5.0f        // ±5% (±3 PSI) - tighter control
+#define PID_RANGE_MODERATE 7.0f    // ±7% (±4 PSI) - moderate range
+#define PID_RANGE_SLOW 6.0f        // ±6% (±3.5 PSI) - conservative
+#define PID_RANGE_FINE 8.0f        // ±8% (±5 PSI) - wider for precision
 
 // Zone-specific PID gain multipliers (applied to base Kp, Ki, Kd)
 #define PID_GAIN_MULT_FAST 1.5f    // Aggressive (fast response)
@@ -169,11 +180,12 @@
 #define PID_SAMPLE_TIME_MS 100        // Same as control loop (10 Hz)
 
 // Auto-tune configuration
-#define AUTOTUNE_TARGET_WEIGHT 50.0f  // 50 lb test fill
-#define AUTOTUNE_SETPOINT_PCT 50.0f   // Test at 50% pressure
-#define AUTOTUNE_TIMEOUT_MS 120000    // 2 minute timeout
-#define AUTOTUNE_MIN_OSCILLATIONS 3   // Minimum oscillations to detect
-#define AUTOTUNE_STEP_PERCENT 20.0f   // Step size for relay tuning
+#define AUTOTUNE_TARGET_WEIGHT 50.0f     // 50 lb test fill
+#define AUTOTUNE_WEIGHT_SETPOINT 25.0f   // Oscillate around 25 lbs (50% of test)
+#define AUTOTUNE_PRESSURE_CENTER 47.5f   // Center pressure (middle of 30-65 range)
+#define AUTOTUNE_TIMEOUT_MS 120000       // 2 minute timeout
+#define AUTOTUNE_MIN_OSCILLATIONS 3      // Minimum oscillations to detect
+#define AUTOTUNE_STEP_PERCENT 12.5f      // ±12.5% = 35-60% range (stays in 30-65 PSI)
 
 // NVS storage keys for PID parameters
 #define NVS_NAMESPACE "pid_params"

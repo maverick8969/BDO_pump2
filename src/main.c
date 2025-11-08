@@ -242,15 +242,17 @@ static void control_task_fill_logic(void)
             float weight_delta = g_system_state.current_weight_lbs - prev_weight;
             float flow_rate = weight_delta / dt;  // lbs/sec
 
-            // Estimate ideal flow rate based on zone
-            // These are rough estimates - auto-tune will optimize
+            // Target flow rates based on real testing data
+            // 30 PSI = 2 pumps/sec = 1.0 lb/sec
+            // 65 PSI = 5-6 pumps/sec = 3.0 lb/sec
+            // Each pump = ~0.5 lb
             float target_flow;
             switch (new_zone) {
-                case ZONE_FAST:     target_flow = 3.0f; break;  // Fast fill
-                case ZONE_MODERATE: target_flow = 2.0f; break;  // Moderate
-                case ZONE_SLOW:     target_flow = 1.0f; break;  // Slow
-                case ZONE_FINE:     target_flow = 0.3f; break;  // Very slow/precise
-                default:            target_flow = 1.0f; break;
+                case ZONE_FAST:     target_flow = 3.0f; break;  // 65 PSI: 5-6 pumps/sec
+                case ZONE_MODERATE: target_flow = 2.0f; break;  // 55 PSI: 4 pumps/sec
+                case ZONE_SLOW:     target_flow = 1.5f; break;  // 45 PSI: 3 pumps/sec
+                case ZONE_FINE:     target_flow = 1.0f; break;  // 30 PSI: 2 pumps/sec
+                default:            target_flow = 2.0f; break;
             }
 
             // Use hybrid control: zone setpoint modulated by flow rate error
