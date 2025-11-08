@@ -116,13 +116,16 @@ esp_err_t pressure_controller_load_pid_params(void)
     }
 
     // Read PID parameters
-    ret = nvs_get_blob(nvs_handle, NVS_KEY_KP, &s_pid.kp, &(size_t){sizeof(float)});
+    size_t size = sizeof(float);
+    ret = nvs_get_blob(nvs_handle, NVS_KEY_KP, &s_pid.kp, &size);
     if (ret != ESP_OK) goto cleanup;
 
-    ret = nvs_get_blob(nvs_handle, NVS_KEY_KI, &s_pid.ki, &(size_t){sizeof(float)});
+    size = sizeof(float);
+    ret = nvs_get_blob(nvs_handle, NVS_KEY_KI, &s_pid.ki, &size);
     if (ret != ESP_OK) goto cleanup;
 
-    ret = nvs_get_blob(nvs_handle, NVS_KEY_KD, &s_pid.kd, &(size_t){sizeof(float)});
+    size = sizeof(float);
+    ret = nvs_get_blob(nvs_handle, NVS_KEY_KD, &s_pid.kd, &size);
     if (ret != ESP_OK) goto cleanup;
 
     uint8_t tuned = 0;

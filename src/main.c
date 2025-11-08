@@ -66,6 +66,9 @@ static TaskHandle_t task_display = NULL;
 static TaskHandle_t task_webserver = NULL;
 static TaskHandle_t task_mqtt = NULL;
 
+/* Forward declarations */
+static void control_task_fill_logic(void);
+
 /**
  * @brief Scale reading task
  *
