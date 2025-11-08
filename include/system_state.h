@@ -63,8 +63,25 @@ typedef enum {
     ERROR_PRESSURE_FAULT,
     ERROR_SAFETY_TIMEOUT,
     ERROR_OVERFILL,
-    ERROR_WIFI_DISCONNECTED
+    ERROR_WIFI_DISCONNECTED,
+    ERROR_AUTOTUNE_TIMEOUT,
+    ERROR_AUTOTUNE_FAILED
 } error_code_t;
+
+/* =============================================================================
+ * AUTO-TUNE STATE
+ * ===========================================================================*/
+
+typedef enum {
+    AUTOTUNE_IDLE = 0,
+    AUTOTUNE_INIT,           // Initialize test fill
+    AUTOTUNE_SETTLING,       // Wait for system to settle
+    AUTOTUNE_RELAY_TEST,     // Perform relay auto-tune
+    AUTOTUNE_CALCULATING,    // Calculate PID parameters
+    AUTOTUNE_COMPLETE,       // Tuning complete, ready to save
+    AUTOTUNE_TIMEOUT,        // Tuning timeout
+    AUTOTUNE_CANCELLED       // User cancelled
+} autotune_state_t;
 
 /* =============================================================================
  * SYSTEM STATE STRUCTURE
@@ -109,6 +126,19 @@ typedef struct {
     float avg_fill_time_ms;
     float avg_error_lbs;
     float avg_pressure_pct;
+
+    // PID control parameters
+    float pid_kp;                   // Proportional gain
+    float pid_ki;                   // Integral gain
+    float pid_kd;                   // Derivative gain
+    bool pid_tuned;                 // True if auto-tuned, false if defaults
+    bool pid_enabled;               // True = PID control, False = zone control
+
+    // Auto-tune state
+    autotune_state_t autotune_state;
+    float autotune_kp;              // Calculated Kp from auto-tune
+    float autotune_ki;              // Calculated Ki from auto-tune
+    float autotune_kd;              // Calculated Kd from auto-tune
 
 } system_state_t;
 
@@ -180,6 +210,8 @@ static inline const char* error_to_string(error_code_t error)
         case ERROR_SAFETY_TIMEOUT: return "SAFETY_TIMEOUT";
         case ERROR_OVERFILL: return "OVERFILL";
         case ERROR_WIFI_DISCONNECTED: return "WIFI_DISCONNECTED";
+        case ERROR_AUTOTUNE_TIMEOUT: return "AUTOTUNE_TIMEOUT";
+        case ERROR_AUTOTUNE_FAILED: return "AUTOTUNE_FAILED";
         default: return "UNKNOWN";
     }
 }
