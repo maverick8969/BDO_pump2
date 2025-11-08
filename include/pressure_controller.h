@@ -104,4 +104,27 @@ bool pressure_controller_is_autotuning(void);
  */
 esp_err_t pressure_controller_get_autotune_results(float *kp, float *ki, float *kd);
 
+/**
+ * @brief Set pressure using hybrid zone/PID control
+ *
+ * Uses PID to smoothly transition to and maintain zone setpoints.
+ * Eliminates step changes between zones while maintaining zone structure.
+ *
+ * @param zone_setpoint Target pressure for current zone (0-100%)
+ * @param current_pressure Current measured pressure feedback (0-100%)
+ * @return ESP_OK on success
+ */
+esp_err_t pressure_controller_set_hybrid(float zone_setpoint, float current_pressure);
+
+/**
+ * @brief Set pressure using flow-rate PID control
+ *
+ * Pure PID control based on weight change rate (flow rate).
+ *
+ * @param target_flow_rate Target flow in lbs/sec
+ * @param current_flow_rate Current measured flow in lbs/sec
+ * @return ESP_OK on success
+ */
+esp_err_t pressure_controller_set_flow_pid(float target_flow_rate, float current_flow_rate);
+
 #endif // PRESSURE_CONTROLLER_H

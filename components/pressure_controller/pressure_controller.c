@@ -556,3 +556,159 @@ bool pressure_controller_get_feedback(void)
     // Read PNP feedback from ITV2030
     return (gpio_get_level(PIN_ITV_FEEDBACK) == 1);
 }
+
+/* =============================================================================
+ * HYBRID ZONE/PID CONTROL
+ * ===========================================================================*/
+
+/**
+ * @brief Get zone-specific PID gain multiplier
+ * @param zone Current fill zone
+ * @return Gain multiplier for this zone
+ */
+static float get_zone_gain_multiplier(fill_zone_t zone)
+{
+    switch (zone) {
+        case ZONE_FAST:     return PID_GAIN_MULT_FAST;
+        case ZONE_MODERATE: return PID_GAIN_MULT_MODERATE;
+        case ZONE_SLOW:     return PID_GAIN_MULT_SLOW;
+        case ZONE_FINE:     return PID_GAIN_MULT_FINE;
+        default:            return 1.0f;
+    }
+}
+
+/**
+ * @brief Get zone-specific PID output range
+ * @param zone Current fill zone
+ * @return Max PID adjustment range (±) in percentage points
+ */
+static float get_zone_pid_range(fill_zone_t zone)
+{
+    switch (zone) {
+        case ZONE_FAST:     return PID_RANGE_FAST;
+        case ZONE_MODERATE: return PID_RANGE_MODERATE;
+        case ZONE_SLOW:     return PID_RANGE_SLOW;
+        case ZONE_FINE:     return PID_RANGE_FINE;
+        default:            return 10.0f;
+    }
+}
+
+esp_err_t pressure_controller_set_hybrid(float zone_setpoint, float current_pressure)
+{
+    // Get current zone from global state
+    fill_zone_t zone = g_system_state.active_zone;
+
+    // Get zone-specific gain multiplier
+    float gain_mult = get_zone_gain_multiplier(zone);
+
+    // Apply zone-specific gains temporarily for this computation
+    float temp_kp = s_pid.kp * gain_mult;
+    float temp_ki = s_pid.ki * gain_mult;
+    float temp_kd = s_pid.kd * gain_mult;
+
+    // Calculate error (setpoint - measurement)
+    float error = zone_setpoint - current_pressure;
+
+    uint64_t now_us = esp_timer_get_time();
+    float dt = (now_us - s_pid.last_time_us) / 1000000.0f;
+
+    // Handle first call or very small dt
+    if (dt <= 0.0f || dt > 1.0f) {
+        s_pid.last_time_us = now_us;
+        s_pid.prev_measurement = current_pressure;
+        return set_dac_output(zone_setpoint);  // Use zone setpoint directly
+    }
+
+    // Proportional term
+    float p_term = temp_kp * error;
+
+    // Integral term with anti-windup
+    s_pid.integral += error * dt;
+
+    // Clamp integral based on zone range
+    float zone_range = get_zone_pid_range(zone);
+    float integral_limit = zone_range / (temp_ki + 0.001f);  // Prevent divide by zero
+
+    if (s_pid.integral > integral_limit) {
+        s_pid.integral = integral_limit;
+    } else if (s_pid.integral < -integral_limit) {
+        s_pid.integral = -integral_limit;
+    }
+
+    float i_term = temp_ki * s_pid.integral;
+
+    // Derivative term (on measurement to avoid derivative kick)
+    float derivative = (current_pressure - s_pid.prev_measurement) / dt;
+    float d_term = -temp_kd * derivative;
+
+    // Compute PID adjustment
+    float pid_adjustment = p_term + i_term + d_term;
+
+    // Clamp PID adjustment to zone-specific range
+    if (pid_adjustment > zone_range) {
+        pid_adjustment = zone_range;
+    } else if (pid_adjustment < -zone_range) {
+        pid_adjustment = -zone_range;
+    }
+
+    // Combine zone setpoint with PID adjustment
+    float output = zone_setpoint + pid_adjustment;
+
+    // Clamp to valid output range
+    if (output < PID_OUTPUT_MIN) {
+        output = PID_OUTPUT_MIN;
+    } else if (output > PID_OUTPUT_MAX) {
+        output = PID_OUTPUT_MAX;
+    }
+
+    // Update state
+    s_pid.prev_measurement = current_pressure;
+    s_pid.last_time_us = now_us;
+    s_pid.output_percent = output;
+
+    // Set DAC output
+    return set_dac_output(output);
+}
+
+/* =============================================================================
+ * FLOW-RATE PID CONTROL
+ * ===========================================================================*/
+
+typedef struct {
+    float prev_weight;
+    uint64_t prev_time_us;
+    float filtered_flow;  // Low-pass filtered flow rate
+} flow_state_t;
+
+static flow_state_t s_flow = {0};
+
+esp_err_t pressure_controller_set_flow_pid(float target_flow_rate, float current_weight)
+{
+    uint64_t now_us = esp_timer_get_time();
+    float dt = (now_us - s_flow.prev_time_us) / 1000000.0f;
+
+    // Initialize on first call
+    if (s_flow.prev_time_us == 0 || dt > 1.0f) {
+        s_flow.prev_weight = current_weight;
+        s_flow.prev_time_us = now_us;
+        s_flow.filtered_flow = 0.0f;
+        return ESP_OK;
+    }
+
+    // Calculate instantaneous flow rate (lbs/sec)
+    float weight_delta = current_weight - s_flow.prev_weight;
+    float instant_flow = weight_delta / dt;
+
+    // Low-pass filter flow rate to reduce noise (alpha = 0.3)
+    s_flow.filtered_flow = 0.3f * instant_flow + 0.7f * s_flow.filtered_flow;
+
+    // Use standard PID computation with filtered flow
+    float output = pressure_controller_compute_pid(target_flow_rate, s_flow.filtered_flow);
+
+    // Update state
+    s_flow.prev_weight = current_weight;
+    s_flow.prev_time_us = now_us;
+
+    // Set DAC output
+    return set_dac_output(output);
+}

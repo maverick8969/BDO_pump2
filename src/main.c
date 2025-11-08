@@ -28,6 +28,7 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_event.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
@@ -121,8 +122,30 @@ static void control_task(void *pvParameters)
                 break;
 
             case STATE_FILLING:
-                // Multi-zone control logic
-                control_task_fill_logic();
+                // Check if auto-tune is active
+                if (pressure_controller_is_autotuning()) {
+                    // Run auto-tune state machine
+                    esp_err_t result = pressure_controller_run_autotune(g_system_state.current_weight_lbs);
+
+                    if (result == ESP_OK) {
+                        // Auto-tune complete
+                        ESP_LOGI(TAG, "Auto-tune completed successfully");
+                        pressure_controller_set_percent(0.0f);
+                        g_system_state.state = STATE_IDLE;
+
+                        // Results are stored in g_system_state.autotune_kp/ki/kd
+                        // User can save via menu
+                    } else if (result == ESP_FAIL) {
+                        // Auto-tune failed
+                        ESP_LOGE(TAG, "Auto-tune failed");
+                        pressure_controller_set_percent(0.0f);
+                        g_system_state.state = STATE_ERROR;
+                    }
+                    // ESP_ERR_INVALID_STATE means still in progress
+                } else {
+                    // Normal fill - multi-zone control logic
+                    control_task_fill_logic();
+                }
                 break;
 
             case STATE_COMPLETED:
@@ -145,30 +168,36 @@ static void control_task(void *pvParameters)
 }
 
 /**
- * @brief Fill control logic (multi-zone)
+ * @brief Fill control logic (hybrid zone/PID or simple zone control)
  */
 static void control_task_fill_logic(void)
 {
+    static float prev_weight = 0.0f;
+    static uint64_t prev_time_us = 0;
+
     float remaining = g_system_state.target_weight_lbs - g_system_state.current_weight_lbs;
     float percent_complete = (g_system_state.current_weight_lbs / g_system_state.target_weight_lbs) * 100.0f;
 
-    // Determine zone and set pressure
-    if (percent_complete < 40.0f) {
-        // FAST ZONE (0-40%)
-        g_system_state.active_zone = ZONE_FAST;
-        pressure_controller_set_percent(100.0f);
-    } else if (percent_complete < 70.0f) {
-        // MODERATE ZONE (40-70%)
-        g_system_state.active_zone = ZONE_MODERATE;
-        pressure_controller_set_percent(70.0f);
-    } else if (percent_complete < 90.0f) {
-        // SLOW ZONE (70-90%)
-        g_system_state.active_zone = ZONE_SLOW;
-        pressure_controller_set_percent(40.0f);
-    } else if (percent_complete < 98.0f) {
-        // FINE ZONE (90-98%)
-        g_system_state.active_zone = ZONE_FINE;
-        pressure_controller_set_percent(20.0f);
+    // Determine zone based on updated thresholds
+    fill_zone_t new_zone;
+    float zone_setpoint;
+
+    if (percent_complete < ZONE_FAST_END) {
+        // FAST ZONE (0-60%)
+        new_zone = ZONE_FAST;
+        zone_setpoint = PRESSURE_FAST;
+    } else if (percent_complete < ZONE_MODERATE_END) {
+        // MODERATE ZONE (60-85%)
+        new_zone = ZONE_MODERATE;
+        zone_setpoint = PRESSURE_MODERATE;
+    } else if (percent_complete < ZONE_SLOW_END) {
+        // SLOW ZONE (85-97.5%)
+        new_zone = ZONE_SLOW;
+        zone_setpoint = PRESSURE_SLOW;
+    } else if (percent_complete < ZONE_FINE_END) {
+        // FINE ZONE (97.5-100%)
+        new_zone = ZONE_FINE;
+        zone_setpoint = PRESSURE_FINE;
     } else {
         // COMPLETE
         pressure_controller_set_percent(0.0f);
@@ -179,6 +208,75 @@ static void control_task_fill_logic(void)
 
         // Publish fill complete event to MQTT
         mqtt_publish_fill_complete();
+        return;
+    }
+
+    // Track zone transitions
+    if (new_zone != g_system_state.active_zone) {
+        g_system_state.zone_transitions++;
+        ESP_LOGI(TAG, "Zone transition: %s -> %s",
+                 zone_to_string(g_system_state.active_zone),
+                 zone_to_string(new_zone));
+
+        // Reset PID on zone change for hybrid mode
+        if (g_system_state.pid_enabled) {
+            pressure_controller_reset_pid();
+        }
+    }
+
+    g_system_state.active_zone = new_zone;
+    g_system_state.pressure_setpoint_pct = zone_setpoint;
+
+    // Choose control mode
+    if (g_system_state.pid_enabled) {
+        // HYBRID MODE: Zone setpoint + PID smoothing
+        // Use weight error as feedback for PID
+
+        // Calculate ideal weight trajectory for this zone
+        // (Simple approach: assume linear fill within each zone)
+        uint64_t now_us = esp_timer_get_time();
+        float dt = (now_us - prev_time_us) / 1000000.0f;
+
+        if (dt > 0.001f && dt < 1.0f) {
+            // Calculate current flow rate
+            float weight_delta = g_system_state.current_weight_lbs - prev_weight;
+            float flow_rate = weight_delta / dt;  // lbs/sec
+
+            // Estimate ideal flow rate based on zone
+            // These are rough estimates - auto-tune will optimize
+            float target_flow;
+            switch (new_zone) {
+                case ZONE_FAST:     target_flow = 3.0f; break;  // Fast fill
+                case ZONE_MODERATE: target_flow = 2.0f; break;  // Moderate
+                case ZONE_SLOW:     target_flow = 1.0f; break;  // Slow
+                case ZONE_FINE:     target_flow = 0.3f; break;  // Very slow/precise
+                default:            target_flow = 1.0f; break;
+            }
+
+            // Use hybrid control: zone setpoint modulated by flow rate error
+            // Convert flow error to pressure adjustment
+            float flow_error = target_flow - flow_rate;
+            float pressure_adjustment = pressure_controller_compute_pid(target_flow, flow_rate);
+
+            // Apply adjustment to zone setpoint
+            float output = zone_setpoint + (pressure_adjustment - zone_setpoint);
+
+            // Clamp to reasonable bounds
+            if (output < 0.0f) output = 0.0f;
+            if (output > 100.0f) output = 100.0f;
+
+            pressure_controller_set_percent(output);
+        } else {
+            // First iteration or timeout - use zone setpoint
+            pressure_controller_set_percent(zone_setpoint);
+        }
+
+        prev_weight = g_system_state.current_weight_lbs;
+        prev_time_us = now_us;
+
+    } else {
+        // SIMPLE ZONE CONTROL (original behavior)
+        pressure_controller_set_percent(zone_setpoint);
     }
 }
 

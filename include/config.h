@@ -87,16 +87,29 @@
  * ===========================================================================*/
 
 // Zone thresholds (percentage of target weight)
-#define ZONE_FAST_END 40.0f        // 0-40% of target
-#define ZONE_MODERATE_END 70.0f    // 40-70% of target
-#define ZONE_SLOW_END 90.0f        // 70-90% of target
-#define ZONE_FINE_END 98.0f        // 90-98% of target
+#define ZONE_FAST_END 60.0f        // 0-60% of target
+#define ZONE_MODERATE_END 85.0f    // 60-85% of target
+#define ZONE_SLOW_END 97.5f        // 85-97.5% of target
+#define ZONE_FINE_END 100.0f       // 97.5-100% of target
 
-// Pressure setpoints for each zone (percentage, 0-100%)
-#define PRESSURE_FAST 100.0f       // Full pressure
-#define PRESSURE_MODERATE 70.0f    // 70% pressure
-#define PRESSURE_SLOW 40.0f        // 40% pressure
-#define PRESSURE_FINE 20.0f        // 20% pressure
+// Base pressure setpoints for each zone (percentage, 0-100%)
+// These are used as base values for hybrid PID control
+#define PRESSURE_FAST 33.0f        // ~20 PSI equivalent (aggressive)
+#define PRESSURE_MODERATE 66.0f    // ~40 PSI equivalent
+#define PRESSURE_SLOW 100.0f       // ~60 PSI equivalent
+#define PRESSURE_FINE 83.0f        // ~50 PSI equivalent (prevent overshoot)
+
+// PID adjustment ranges per zone (percentage points, ±)
+#define PID_RANGE_FAST 8.0f        // ±5 PSI equivalent (±8%)
+#define PID_RANGE_MODERATE 16.0f   // ±10 PSI equivalent (±16%)
+#define PID_RANGE_SLOW 13.0f       // ±8 PSI equivalent (±13%)
+#define PID_RANGE_FINE 16.0f       // ±10 PSI equivalent (±16%)
+
+// Zone-specific PID gain multipliers (applied to base Kp, Ki, Kd)
+#define PID_GAIN_MULT_FAST 1.5f    // Aggressive (fast response)
+#define PID_GAIN_MULT_MODERATE 1.0f // Moderate (normal)
+#define PID_GAIN_MULT_SLOW 0.7f    // Conservative
+#define PID_GAIN_MULT_FINE 0.4f    // Very conservative (prevent overshoot)
 
 // Control loop timing
 #define CONTROL_LOOP_INTERVAL_MS 100  // 10 Hz control loop
