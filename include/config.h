@@ -139,6 +139,37 @@
 #define WEIGHT_INCREMENT_LBS 5.0f    // Encoder increment
 
 /* =============================================================================
+ * PID CONTROL CONFIGURATION
+ * ===========================================================================*/
+// Default PID parameters (tunable via auto-tune)
+#define DEFAULT_PID_KP 2.5f           // Proportional gain
+#define DEFAULT_PID_KI 0.5f           // Integral gain
+#define DEFAULT_PID_KD 0.1f           // Derivative gain
+
+// PID limits
+#define PID_OUTPUT_MIN 0.0f           // Minimum output (%)
+#define PID_OUTPUT_MAX 100.0f         // Maximum output (%)
+#define PID_INTEGRAL_MIN -50.0f       // Anti-windup minimum
+#define PID_INTEGRAL_MAX 50.0f        // Anti-windup maximum
+
+// PID sample time
+#define PID_SAMPLE_TIME_MS 100        // Same as control loop (10 Hz)
+
+// Auto-tune configuration
+#define AUTOTUNE_TARGET_WEIGHT 50.0f  // 50 lb test fill
+#define AUTOTUNE_SETPOINT_PCT 50.0f   // Test at 50% pressure
+#define AUTOTUNE_TIMEOUT_MS 120000    // 2 minute timeout
+#define AUTOTUNE_MIN_OSCILLATIONS 3   // Minimum oscillations to detect
+#define AUTOTUNE_STEP_PERCENT 20.0f   // Step size for relay tuning
+
+// NVS storage keys for PID parameters
+#define NVS_NAMESPACE "pid_params"
+#define NVS_KEY_KP "kp"
+#define NVS_KEY_KI "ki"
+#define NVS_KEY_KD "kd"
+#define NVS_KEY_TUNED "tuned"         // Flag: 0 = defaults, 1 = auto-tuned
+
+/* =============================================================================
  * POWER SYSTEM (24V)
  * ===========================================================================*/
 // ESP32 powered via 5V USB or Vin (7-12V recommended, buck converted from 24V)
