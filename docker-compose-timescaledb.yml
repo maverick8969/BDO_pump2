@@ -1,0 +1,171 @@
+version: '3.8'
+
+# ============================================================================
+# CHEMICAL DOSING SYSTEM - TIMESCALEDB STACK
+# Components: Mosquitto, TimescaleDB, Telegraf, Grafana
+# ============================================================================
+
+services:
+  # ==========================================================================
+  # MQTT BROKER (Eclipse Mosquitto)
+  # ==========================================================================
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: dosing-mosquitto
+    hostname: mosquitto
+    ports:
+      - "1883:1883"      # MQTT
+      - "9001:9001"      # WebSockets (optional)
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    restart: unless-stopped
+    networks:
+      - dosing-network
+
+  # ==========================================================================
+  # TIMESCALEDB (PostgreSQL + Time Series Extension)
+  # ==========================================================================
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    container_name: dosing-timescaledb
+    hostname: timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      # Database configuration
+      - POSTGRES_DB=factory_metrics
+      - POSTGRES_USER=telegraf
+      - POSTGRES_PASSWORD=changeme_secure_password
+
+      # Disable telemetry
+      - TIMESCALEDB_TELEMETRY=off
+
+      # Performance tuning (adjust based on your system)
+      - TS_TUNE_MEMORY=2GB
+      - TS_TUNE_NUM_CPUS=2
+
+      # Max connections
+      - POSTGRES_MAX_CONNECTIONS=100
+    volumes:
+      # Persistent data storage
+      - timescaledb-data:/var/lib/postgresql/data
+
+      # Initialization script (creates tables and hypertables)
+      - ./init-timescaledb.sql:/docker-entrypoint-initdb.d/init.sql
+
+      # Optional: Custom PostgreSQL config
+      # - ./postgresql.conf:/etc/postgresql/postgresql.conf
+    restart: unless-stopped
+    networks:
+      - dosing-network
+    command: postgres -c shared_preload_libraries=timescaledb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telegraf -d factory_metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # TELEGRAF (Data Collector - MQTT to TimescaleDB)
+  # ==========================================================================
+  telegraf:
+    image: telegraf:1.28
+    container_name: dosing-telegraf
+    hostname: telegraf
+    volumes:
+      # Telegraf configuration
+      - ./telegraf-timescaledb.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dosing-network
+    environment:
+      # Optional: Override config values via environment
+      - INFLUX_TOKEN=not_used_for_timescaledb
+
+  # ==========================================================================
+  # GRAFANA (Visualization and Dashboards)
+  # ==========================================================================
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: dosing-grafana
+    hostname: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Admin credentials (change in production!)
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+      # Server settings
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+
+      # Anonymous access (disable in production)
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+
+      # Install plugins (comma-separated list)
+      - GF_INSTALL_PLUGINS=
+
+      # Logging
+      - GF_LOG_LEVEL=info
+    volumes:
+      # Persistent storage for dashboards and settings
+      - grafana-data:/var/lib/grafana
+
+      # Provisioning (auto-configure data sources and dashboards)
+      - ./grafana/provisioning:/etc/grafana/provisioning
+
+      # Optional: Custom grafana.ini
+      # - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dosing-network
+
+  # ==========================================================================
+  # OPTIONAL: PGADMIN (Database Administration Tool)
+  # ==========================================================================
+  # Uncomment if you want a web-based PostgreSQL admin interface
+
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: dosing-pgadmin
+  #   ports:
+  #     - "5050:80"
+  #   environment:
+  #     - PGADMIN_DEFAULT_EMAIL=admin@example.com
+  #     - PGADMIN_DEFAULT_PASSWORD=admin
+  #   volumes:
+  #     - pgadmin-data:/var/lib/pgadmin
+  #   depends_on:
+  #     - timescaledb
+  #   restart: unless-stopped
+  #   networks:
+  #     - dosing-network
+
+# ============================================================================
+# VOLUMES (Persistent Storage)
+# ============================================================================
+volumes:
+  timescaledb-data:
+    driver: local
+  grafana-data:
+    driver: local
+  # pgadmin-data:
+  #   driver: local
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  dosing-network:
+    name: dosing-network
+    driver: bridge
